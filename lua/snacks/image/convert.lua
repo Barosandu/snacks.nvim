@@ -50,7 +50,7 @@ local commands = {
   data_img = {
     cmd = function(step)
       local image_src = step.meta.src
-      local clean_image_data = image_src:gsub("^data:image/%w+;base64,", ""):gsub(" ", "+")
+      local clean_image_data = image_src:gsub("^data:image/[^;]+;base64,", ""):gsub(" ", "+")
       local decoded = vim.base64 and vim.base64.decode(clean_image_data) or nil
       if not decoded then
         -- returning empty command
