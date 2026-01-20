@@ -47,6 +47,35 @@ local uv = vim.uv or vim.loop
 
 ---@type table<string, snacks.image.cmd>
 local commands = {
+  data_img = {
+    cmd = function(step)
+      local image_src = step.meta.src
+      local clean_image_data = image_src:gsub("^data:image/[^;]+;base64,", ""):gsub(" ", "+")
+      local decoded = vim.base64 and vim.base64.decode(clean_image_data) or nil
+      if not decoded then
+        -- returning empty command
+        return {
+          cmd = "echo",
+          args = {},
+        }
+      end
+      local filename = step.file
+      local f = io.open(filename, "wb")
+      if f then
+        f:write(decoded)
+        f:close()
+      end
+      -- returning empty command
+      return {
+        cmd = "echo",
+        args = {},
+      }
+    end,
+    file = function(convert, ctx)
+      local truncated = convert.prefix
+      return Snacks.image.config.cache .. "/" .. truncated .. ".data"
+    end,
+  },
   icns = {
     ft = "png",
     cmd = {
@@ -262,6 +291,10 @@ function Convert.new(opts)
     base = self.opts.src:gsub("%?.*", ""):match("^%w%w+://(.*)$") or base
   end
   self.prefix = vim.fn.sha256(self.opts.src .. self.page):sub(1, 8) .. "-" .. base:gsub("[^%w%.]+", "-")
+  if self.opts.src:find("^data:") then
+    -- in order to get rid of big file names
+    self.prefix = self.prefix:sub(1, 64)
+  end
   self.meta = { src = opts.src }
   self.steps = {}
   self.tpl_data = {
@@ -325,6 +358,10 @@ function Convert:ft(src)
 end
 
 function Convert:resolve()
+  if self.src:find("^data:") == 1 then
+    self:_resolve("data_img")
+    self:_resolve("identify")
+  end
   if M.is_uri(self.src) then
     self:_resolve("url")
     self:_resolve("identify")
@@ -370,7 +407,7 @@ function Convert:on_done()
   local step = self:current()
   self._done = true
   if self._err and Snacks.image.config.convert.notify then
-    local title = step and ("Conversion failed at step `%s`"):format(step.name) or "Conversion failed"
+    local title = step and ("Conversion failed at step `%s` "):format(step.name) or "Conversion failed"
     if step and step.proc then
       step.proc:debug({ title = title })
     else
@@ -454,9 +491,9 @@ function Convert:run()
     return self:on_done()
   end
 
-  if not M.is_uri(self.src) and vim.fn.filereadable(self.src) == 0 then
+  if not M.is_uri(self.src) and vim.fn.filereadable(self.src) == 0 and not (self.src:find("^data:") == 1) then
     local f = M.is_uri(self.src) and self.src or vim.fn.fnamemodify(self.src, ":p:~")
-    self._err = ("File not found\n- `%s`"):format(f)
+    self._err = ("File not found... \n- `%s`"):format(self.src)
     return self:on_done()
   end
 
@@ -475,6 +512,9 @@ end
 
 ---@param src string
 function M.norm(src)
+  if src:find("^data:") then
+    return src
+  end
   if src:find("^file://") then
     src = vim.uri_to_fname(src)
   end
